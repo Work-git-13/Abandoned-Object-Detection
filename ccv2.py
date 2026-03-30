@@ -8,10 +8,11 @@ bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=3000, varThreshold=18
 STATIONARY_TIME = 120   # Сколько кадров объект должен быть неподвижен
 DISTANCE_THRESHOLD = 20 # Порог смещения центра объекта
 OBJECT_AREA = 20        # Минимальная область объекта для отслеживания
+MAX_HIDDEN_TIME = 90    # Сколько кадров объект может быть вне поля зрения
 
-tracked_items = {}      #формат - {center: {'frames': int, 'rect': (x,y,w,h), 'is_human': bool}}
+tracked_items = {}      #формат - {center: {'frames': int, 'rect': (x,y,w,h), 'is_human': bool, 'hidden_frames': int}}
 
-cap = cv2.VideoCapture('sourse_video\streetcam1.mp4')
+cap = cv2.VideoCapture('sourse_video\streetcam2.mp4')
 
 
 # Параметры для записи 
@@ -37,6 +38,8 @@ while cap.isOpened():
     contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     active_in_this_frame = []
+    
+    matched_old_centers = set() #Список для отслеживания тех, кого мы уже нашли в этом кадре
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
@@ -53,6 +56,10 @@ while cap.isOpened():
             if dist < DISTANCE_THRESHOLD:
                 tracked_items[old_center]['frames'] += 1
                 tracked_items[old_center]['rect'] = (x, y, w, h)
+
+                tracked_items[old_center]['hidden_frames'] = 0 
+                matched_old_centers.add(old_center)
+
                 found_match = True
                 
                 # Если объект стоит достаточно долго, проверяем его на человека (на 20 кадре)
@@ -72,7 +79,14 @@ while cap.isOpened():
                 break
         
         if not found_match:
-            tracked_items[center] = {'frames': 1, 'rect': (x, y, w, h), 'is_human': False}
+            tracked_items[center] = {'frames': 1, 'rect': (x, y, w, h), 'is_human': False, 'hidden_frames': 0}
+
+    #Логика обработки "пропавших" объектов
+    for old_center in list(tracked_items.keys()):
+        if old_center not in matched_old_centers:
+            tracked_items[old_center]['hidden_frames'] += 1
+            if tracked_items[old_center]['hidden_frames'] > MAX_HIDDEN_TIME:
+                del tracked_items[old_center]
 
     # Очистка старых данных (если объект исчез из маски)
     # Очистка грубая, в реальной задаче стоило бы удалять объекты по возрастанию 
